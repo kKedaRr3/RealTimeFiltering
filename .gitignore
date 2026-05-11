@@ -1,0 +1,20 @@
+.vs/
+out/
+build/
+bin/
+obj/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeSettings.json
+cmake_install.cmake
+
+# Pliki binarne i biblioteki
+*.exe
+*.dll
+*.lib
+*.pdb
+
+# Dane testowe (opcjonalnie, jeśli wideo jest duże)
+*.mp4
