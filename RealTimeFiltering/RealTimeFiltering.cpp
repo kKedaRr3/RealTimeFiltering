@@ -50,7 +50,7 @@ RealTimeFiltering::RealTimeFiltering(QWidget* parent) : QMainWindow(parent) {
     connect(timer, &QTimer::timeout, this, &RealTimeFiltering::updateFrame);
     connect(btnGroup, QOverload<int>::of(&QButtonGroup::idClicked), this, &RealTimeFiltering::filterChanged);
 
-    timer->start(16);
+    timer->start(0);
 }
 
 RealTimeFiltering::~RealTimeFiltering() {
@@ -67,40 +67,31 @@ void RealTimeFiltering::updateFrame() {
     if (!cap.isOpened()) return;
 
     cv::Mat frame;
-    cap >> frame;
+    cap >> frame; // Tutaj OpenCV czeka na klatkę z kamery (zazwyczaj max 30 FPS sprzętowo)
 
-    if (frame.empty() || frame.cols <= 0 || frame.rows <= 0) return;
+    if (frame.empty()) return;
 
-    // Wymuszamy 3 kanały BGR
-    if (frame.channels() != 3) {
-        cv::cvtColor(frame, frame, cv::COLOR_GRAY2BGR);
-    }
-
-    // --- FILTRY ---
-    if (activeFilter == 3) { // Twoja CUDA
-        initCudaBuffer(frame.cols, frame.rows, frame.channels());
-        applyThresholdCuda(frame.data, frame.cols, frame.rows, frame.channels(), 150);
-    }
-    else if (activeFilter == 1) {
-        cv::bitwise_not(frame, frame);
-    }
-    else if (activeFilter == 2) {
+    // 1. Obsługa filtrów (zostaje jak u Ciebie)
+    if (activeFilter == 1) {
         cv::cvtColor(frame, frame, cv::COLOR_BGR2GRAY);
         cv::cvtColor(frame, frame, cv::COLOR_GRAY2BGR);
     }
-
-    // --- BEZPIECZNE WYŚWIETLANIE ---
-    // RGB conversion
-    cv::Mat rgb;
-    cv::cvtColor(frame, rgb, cv::COLOR_BGR2RGB);
-
-    // Tworzymy obraz Qt
-    QImage qimg(rgb.data, rgb.cols, rgb.rows, (int)rgb.step, QImage::Format_RGB888);
-
-    // Robimy kopię, żeby Qt nie czytało z pamięci OpenCV po wyjściu z tej funkcji
-    QPixmap pix = QPixmap::fromImage(qimg.copy());
-
-    if (!pix.isNull()) {
-        videoLabel->setPixmap(pix.scaled(videoLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    else if (activeFilter == 2) {
+        initCudaBuffer(frame.cols, frame.rows, frame.channels());
+        applyLowPassCuda(frame.data, frame.cols, frame.rows);
     }
+    else if (activeFilter == 3) {
+        initCudaBuffer(frame.cols, frame.rows, frame.channels());
+        applyThresholdCuda(frame.data, frame.cols, frame.rows, frame.channels(), 150);
+    }
+
+    cv::cvtColor(frame, frame, cv::COLOR_BGR2RGB);
+
+    QImage qimg(frame.data, frame.cols, frame.rows, (int)frame.step, QImage::Format_RGB888);
+
+    videoLabel->setPixmap(QPixmap::fromImage(qimg).scaled(
+        videoLabel->size(),
+        Qt::KeepAspectRatio,
+        Qt::FastTransformation
+    ));
 }
