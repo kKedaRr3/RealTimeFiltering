@@ -5,6 +5,7 @@
 #include <QButtonGroup>
 #include <QTimer>
 #include <opencv2/opencv.hpp>
+#include <QHBoxLayout>
 
 class RealTimeFiltering : public QMainWindow {
     Q_OBJECT
@@ -18,6 +19,7 @@ private slots:
     void filterChanged(int id); // Wywoływane po kliknięciu przycisku
 
 private:
+    void addButtons(QHBoxLayout* topBar);
     QLabel* videoLabel;        // Miejsce na wideo
     QButtonGroup* btnGroup;    // Grupa przycisków
     cv::VideoCapture cap;      // Obiekt OpenCV do wideo

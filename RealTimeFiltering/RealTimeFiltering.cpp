@@ -6,6 +6,8 @@
 #include "CudaFilters.h" 
 #include <QDebug>
 
+
+
 RealTimeFiltering::RealTimeFiltering(QWidget* parent) : QMainWindow(parent) {
     auto* central = new QWidget(this);
     auto* layout = new QVBoxLayout(central);
@@ -14,13 +16,7 @@ RealTimeFiltering::RealTimeFiltering(QWidget* parent) : QMainWindow(parent) {
     btnGroup = new QButtonGroup(this);
     btnGroup->setExclusive(true);
 
-    for (int i = 0; i < 4; ++i) {
-        auto* btn = new QPushButton(QString("Filtr %1").arg(i + 1));
-        btn->setCheckable(true);
-        btnGroup->addButton(btn, i);
-        topBar->addWidget(btn);
-    }
-    btnGroup->button(0)->setChecked(true);
+	addButtons(topBar);
     activeFilter = 0;
 
     videoLabel = new QLabel("Inicjalizacja...");
@@ -39,7 +35,6 @@ RealTimeFiltering::RealTimeFiltering(QWidget* parent) : QMainWindow(parent) {
     }
 
     // --- OTWIERANIE KAMERY (Tryb DirectShow) ---
-    // cv::CAP_DSHOW omija błędy AMD/MediaFoundation widoczne w Twoich logach
     cap.open(0, cv::CAP_DSHOW);
 
     if (!cap.isOpened()) {
@@ -63,18 +58,39 @@ void RealTimeFiltering::filterChanged(int id) {
     activeFilter = id;
 }
 
+void RealTimeFiltering::addButtons(QHBoxLayout* topBar) {
+    QStringList names = {
+        "Oryginał",
+        "Górnoprzepustowy",
+        "Dolnoprzepustowy",
+        "Binaryzacja"
+    };
+
+    for (int i = 0; i < names.size(); ++i) {
+        auto* btn = new QPushButton(names[i]);
+        btn->setCheckable(true);
+
+        if (i == 0) btn->setChecked(true);
+
+        btnGroup->addButton(btn, i);
+        topBar->addWidget(btn);
+    }
+}
+
 void RealTimeFiltering::updateFrame() {
     if (!cap.isOpened()) return;
 
     cv::Mat frame;
-    cap >> frame; // Tutaj OpenCV czeka na klatkę z kamery (zazwyczaj max 30 FPS sprzętowo)
+    cap >> frame; 
 
     if (frame.empty()) return;
 
-    // 1. Obsługa filtrów (zostaje jak u Ciebie)
-    if (activeFilter == 1) {
-        cv::cvtColor(frame, frame, cv::COLOR_BGR2GRAY);
-        cv::cvtColor(frame, frame, cv::COLOR_GRAY2BGR);
+    if (activeFilter == 0) {
+        // Original video
+    }
+    else if (activeFilter == 1) {
+        initCudaBuffer(frame.cols, frame.rows, frame.channels());
+        applyHighPassCuda(frame.data, frame.cols, frame.rows);
     }
     else if (activeFilter == 2) {
         initCudaBuffer(frame.cols, frame.rows, frame.channels());

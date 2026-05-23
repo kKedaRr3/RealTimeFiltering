@@ -2,12 +2,12 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
-// 1. DEFINICJA KERNELA (Musi być u góry!)
+// 1. Thresholding kernel
 __global__ void thresholdKernel(unsigned char* data, int numPixels, unsigned char threshold) {
     int pixelIdx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (pixelIdx < numPixels) {
-        int offset = pixelIdx * 3; // BGR format (3 bajty na piksel)
+        int offset = pixelIdx * 3; 
 
         // Odczytujemy składowe (OpenCV standardowo używa BGR)
         unsigned char b = data[offset];
@@ -127,6 +127,59 @@ __global__ void filter3x3_LowPass(unsigned char* data, int sizeV, int sizeH)
     }
 }
 
+__global__ void filter3x3_HighPass(unsigned char* data, int sizeV, int sizeH) {
+    const int sharedSize = TILE_WIDTH + 2;
+    __shared__ unsigned char tile[sharedSize][sharedSize][3];
+
+    int tx = threadIdx.x; int ty = threadIdx.y;
+    int tid = ty * TILE_WIDTH + tx;
+    int row = blockIdx.y * TILE_WIDTH + ty;
+    int col = blockIdx.x * TILE_WIDTH + tx;
+
+    // Ładowanie do pamięci współdzielonej 
+    for (int index = tid; index < sharedSize * sharedSize; index += TILE_WIDTH * TILE_WIDTH) {
+        int sRow = index / sharedSize; int sCol = index % sharedSize;
+        int gRow = blockIdx.y * TILE_WIDTH + sRow - 1;
+        int gCol = blockIdx.x * TILE_WIDTH + sCol - 1;
+
+        if (gRow >= 0 && gRow < sizeV && gCol >= 0 && gCol < sizeH) {
+            int globalOffset = (gRow * sizeH + gCol) * 3;
+            tile[sRow][sCol][0] = data[globalOffset + 0];
+            tile[sRow][sCol][1] = data[globalOffset + 1];
+            tile[sRow][sCol][2] = data[globalOffset + 2];
+        }
+        else {
+            tile[sRow][sCol][0] = tile[sRow][sCol][1] = tile[sRow][sCol][2] = 0;
+        }
+    }
+    __syncthreads();
+
+    if (row < sizeV && col < sizeH) {
+        float resB = 0.0f, resG = 0.0f, resR = 0.0f;
+
+        float kernel[3][3] = {
+            {-0.5f, -0.5f, -0.5f},
+            {-0.5f,  5.0f, -0.5f},
+            {-0.5f, -0.5f, -0.5f}
+        };
+
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                float weight = kernel[dy + 1][dx + 1];
+                resB += (float)tile[ty + 1 + dy][tx + 1 + dx][0] * weight;
+                resG += (float)tile[ty + 1 + dy][tx + 1 + dx][1] * weight;
+                resR += (float)tile[ty + 1 + dy][tx + 1 + dx][2] * weight;
+            }
+        }
+
+        int outputOffset = (row * sizeH + col) * 3;
+        // Używamy fminf/fmaxf do przycięcia wyników do zakresu 0-255
+        data[outputOffset + 0] = (unsigned char)fmaxf(0.0f, fminf(255.0f, resB));
+        data[outputOffset + 1] = (unsigned char)fmaxf(0.0f, fminf(255.0f, resG));
+        data[outputOffset + 2] = (unsigned char)fmaxf(0.0f, fminf(255.0f, resR));
+    }
+}
+
 // 2. ZMIENNE I FUNKCJE POMOCNICZE
 unsigned char* d_buffer = nullptr;
 int currentBufferSize = 0;
@@ -148,14 +201,11 @@ void freeCudaBuffer() {
     }
 }
 
-// 3. GŁÓWNA FUNKCJA WYWOŁYWANA Z C++
 void applyThresholdCuda(unsigned char* data, int width, int height, int channels, unsigned char threshold) {
-    // Jeśli z jakiegoś powodu bufor nie został stworzony, nie rób nic
     if (d_buffer == nullptr || data == nullptr || width <= 0 || height <= 0) {
         return;
     }
 
-    // Upewnij się, że obsługujemy tylko 3 kanały, bo kernel ma na sztywno "offset * 3"
     if (channels != 3) return;
 
     int numPixels = width * height;
@@ -170,7 +220,6 @@ void applyThresholdCuda(unsigned char* data, int width, int height, int channels
     cudaMemcpy(data, d_buffer, totalBytes, cudaMemcpyDeviceToHost);
 }
 
-// nie testowalem ale na colabie dziala
 void applyLowPassCuda(unsigned char* data, int width, int height){
     if (d_buffer == nullptr || data == nullptr || width <= 0 || height <= 0) {
         return;
@@ -189,6 +238,16 @@ void applyLowPassCuda(unsigned char* data, int width, int height){
     filter3x3_LowPass<<<dimGrid, dimBlock>>>(d_buffer, height, width );
 
     cudaMemcpy(data, d_buffer, totalBytes, cudaMemcpyDeviceToHost);
+}
+
+void applyHighPassCuda(unsigned char* data, int width, int height) {
+    if (d_buffer == nullptr) return;
+    int size = width * height * 3;
+    cudaMemcpy(d_buffer, data, size, cudaMemcpyHostToDevice);
+    dim3 dimBlock(TILE_WIDTH, TILE_WIDTH);
+    dim3 dimGrid((width - 1) / TILE_WIDTH + 1, (height - 1) / TILE_WIDTH + 1);
+    filter3x3_HighPass << <dimGrid, dimBlock >> > (d_buffer, height, width);
+    cudaMemcpy(data, d_buffer, size, cudaMemcpyDeviceToHost);
 }
 
 bool isCudaAvailable() {

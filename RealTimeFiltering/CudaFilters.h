@@ -8,5 +8,7 @@ void applyThresholdCuda(unsigned char* data, int width, int height, int channels
 
 void applyLowPassCuda(unsigned char* data, int width, int height);
 
+void applyHighPassCuda(unsigned char* data, int width, int height);
+
 // Funkcja wywoływana na końcu
 void freeCudaBuffer();
