@@ -1,14 +1,18 @@
 #pragma once
-bool isCudaAvailable(); 
+
+bool isCudaAvailable();
+
 // Funkcja wywoływana raz na początku
 void initCudaBuffer(int width, int height, int channels);
 
-// Funkcja wywoływana co klatkę (już bez malloc!)
+// Funkcje wywoływane co klatkę
 void applyThresholdCuda(unsigned char* data, int width, int height, int channels, unsigned char threshold);
 
 void applyLowPassCuda(unsigned char* data, int width, int height);
 
 void applyHighPassCuda(unsigned char* data, int width, int height);
+
+void applyEdgeDetectionCuda(unsigned char* data, int width, int height);
 
 // Funkcja wywoływana na końcu
 void freeCudaBuffer();

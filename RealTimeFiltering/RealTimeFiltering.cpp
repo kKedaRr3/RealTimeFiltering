@@ -16,7 +16,7 @@ RealTimeFiltering::RealTimeFiltering(QWidget* parent) : QMainWindow(parent) {
     btnGroup = new QButtonGroup(this);
     btnGroup->setExclusive(true);
 
-	addButtons(topBar);
+    addButtons(topBar);
     activeFilter = 0;
 
     videoLabel = new QLabel("Inicjalizacja...");
@@ -63,7 +63,8 @@ void RealTimeFiltering::addButtons(QHBoxLayout* topBar) {
         "Oryginał",
         "Górnoprzepustowy",
         "Dolnoprzepustowy",
-        "Binaryzacja"
+        "Binaryzacja",
+        "Krawędzie"
     };
 
     for (int i = 0; i < names.size(); ++i) {
@@ -81,7 +82,7 @@ void RealTimeFiltering::updateFrame() {
     if (!cap.isOpened()) return;
 
     cv::Mat frame;
-    cap >> frame; 
+    cap >> frame;
 
     if (frame.empty()) return;
 
@@ -99,6 +100,10 @@ void RealTimeFiltering::updateFrame() {
     else if (activeFilter == 3) {
         initCudaBuffer(frame.cols, frame.rows, frame.channels());
         applyThresholdCuda(frame.data, frame.cols, frame.rows, frame.channels(), 150);
+    }
+    else if (activeFilter == 4) {
+        initCudaBuffer(frame.cols, frame.rows, frame.channels());
+        applyEdgeDetectionCuda(frame.data, frame.cols, frame.rows);
     }
 
     cv::cvtColor(frame, frame, cv::COLOR_BGR2RGB);
