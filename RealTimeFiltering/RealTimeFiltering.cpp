@@ -23,7 +23,7 @@ RealTimeFiltering::RealTimeFiltering(QWidget* parent) : QMainWindow(parent) {
     auto* layout = new QVBoxLayout(central);
     auto* topBar = new QHBoxLayout();
     btnGroup = new QButtonGroup(this);
-    btnGroup->setExclusive(true);
+    btnGroup->setExclusive(false);
 
     addButtons(topBar);
     activeFilter = 0;
@@ -71,27 +71,49 @@ RealTimeFiltering::~RealTimeFiltering() {
 }
 
 void RealTimeFiltering::filterChanged(int id) {
-    activeFilter = id;
+    if (id == 0) { 
+        if (filterButtons[0]->isChecked()) {
+            for (int i = 1; i < filterButtons.size(); ++i) {
+                filterButtons[i]->setChecked(false);
+            }
+            filterPipeline.clear();
+        }
+    }
+    else { 
+        if (filterButtons[id]->isChecked()) {
+            filterButtons[0]->setChecked(false);
+            if (!filterPipeline.contains(id)) {
+                filterPipeline.append(id);
+            }
+        }
+        else {
+            filterPipeline.removeAll(id);
+        }
+    }
 }
 
 void RealTimeFiltering::onFrameReceived(cv::Mat frame) {
     tm.start();
 
-    if (activeFilter == 1) {
+    if (frame.empty()) return;
+
+    if (!filterButtons[0]->isChecked() && !filterPipeline.isEmpty()) {
         initCudaBuffer(frame.cols, frame.rows, frame.channels());
-        applyHighPassCuda(frame.data, frame.cols, frame.rows);
-    }
-    else if (activeFilter == 2) {
-        initCudaBuffer(frame.cols, frame.rows, frame.channels());
-        applyLowPassCuda(frame.data, frame.cols, frame.rows);
-    }
-    else if (activeFilter == 3) {
-        initCudaBuffer(frame.cols, frame.rows, frame.channels());
-        applyThresholdCuda(frame.data, frame.cols, frame.rows, frame.channels(), 150);
-    }
-    else if (activeFilter == 4) {
-        initCudaBuffer(frame.cols, frame.rows, frame.channels());
-        applyEdgeDetectionCuda(frame.data, frame.cols, frame.rows);
+
+        for (int filterId : filterPipeline) {
+            if (filterId == 1) {
+                applyHighPassCuda(frame.data, frame.cols, frame.rows);
+            }
+            else if (filterId == 2) {
+                applyLowPassCuda(frame.data, frame.cols, frame.rows);
+            }
+            else if (filterId == 3) {
+                applyThresholdCuda(frame.data, frame.cols, frame.rows, frame.channels(), 150);
+            }
+            else if (filterId == 4) {
+                applyEdgeDetectionCuda(frame.data, frame.cols, frame.rows);
+            }
+        }
     }
 
     cv::cvtColor(frame, frame, cv::COLOR_BGR2RGB);
@@ -113,12 +135,13 @@ void RealTimeFiltering::onFrameReceived(cv::Mat frame) {
 }
 
 void RealTimeFiltering::addButtons(QHBoxLayout* topBar) {
-    QStringList names = { "Oryginał", "Górnoprzepustowy", "Dolnoprzepustowy", "Binaryzacja" };
+    QStringList names = { "Oryginał", "Górnoprzepustowy", "Dolnoprzepustowy", "Binaryzacja", "Detekcja krawędzi" };
     for (int i = 0; i < names.size(); ++i) {
         auto* btn = new QPushButton(names[i]);
         btn->setCheckable(true);
         if (i == 0) btn->setChecked(true);
         btnGroup->addButton(btn, i);
         topBar->addWidget(btn);
+        filterButtons.append(btn);
     }
 }

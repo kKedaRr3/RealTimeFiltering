@@ -50,4 +50,7 @@ private:
     int activeFilter = 0;
     cv::TickMeter tm;
     int frameCounter = 0;
+
+    QList<QPushButton*> filterButtons;
+    QList<int> filterPipeline;
 };
