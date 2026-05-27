@@ -25,5 +25,9 @@ private:
     cv::VideoCapture cap;      // Obiekt OpenCV do wideo
     QTimer* timer;             // Zegar odświeżania
     int activeFilter = 0;      // ID wybranego filtra
+
+    cv::TickMeter tm;
+    int frameCounter = 0;
+    QLabel* fpsLabel;
 };
 

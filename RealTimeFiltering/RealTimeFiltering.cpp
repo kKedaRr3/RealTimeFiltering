@@ -23,8 +23,18 @@ RealTimeFiltering::RealTimeFiltering(QWidget* parent) : QMainWindow(parent) {
     videoLabel->setAlignment(Qt::AlignCenter);
     videoLabel->setMinimumSize(640, 480);
 
-    layout->addLayout(topBar);
-    layout->addWidget(videoLabel);
+    QHBoxLayout* bottomLayout = new QHBoxLayout();
+    fpsLabel = new QLabel("FPS: 0");
+    // Stylizacja licznika: biały tekst na lekko przezroczystym tle
+    fpsLabel->setStyleSheet("color: yellow; font-weight: bold; background-color: rgba(0,0,0,150); padding: 5px;");
+
+    bottomLayout->addStretch(); // Popycha label do prawej strony
+    bottomLayout->addWidget(fpsLabel);
+    
+    layout->addLayout(topBar, 0);      
+    layout->addWidget(videoLabel, 1);  
+    layout->addLayout(bottomLayout, 0);
+
     setCentralWidget(central);
 
     if (!isCudaAvailable()) {
@@ -81,6 +91,8 @@ void RealTimeFiltering::addButtons(QHBoxLayout* topBar) {
 void RealTimeFiltering::updateFrame() {
     if (!cap.isOpened()) return;
 
+    tm.start();
+
     cv::Mat frame;
     cap >> frame;
 
@@ -115,4 +127,15 @@ void RealTimeFiltering::updateFrame() {
         Qt::KeepAspectRatio,
         Qt::FastTransformation
     ));
+
+    tm.stop(); 
+    frameCounter++;
+    if (frameCounter >= 15) {
+        double currentFps = tm.getFPS();
+        fpsLabel->setText(QString("FPS: %1").arg(QString::number(currentFps, 'f', 1)));
+
+        tm.reset();    
+        frameCounter = 0;
+    }
+
 }
