@@ -27,6 +27,28 @@ __global__ void thresholdKernel(unsigned char* data, int numPixels, unsigned cha
     }
 }
 
+__global__ void threshold(unsigned char* data, int height, int width, unsigned char threshold) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x >= width || y >= height)
+        return;
+
+    int pixelIdx = y * width + x;
+    int offset = pixelIdx * 3;
+
+    unsigned char b = data[offset];
+    unsigned char g = data[offset + 1];
+    unsigned char r = data[offset + 2];
+
+    unsigned char gray = (unsigned char)(0.299f * r + 0.587f * g + 0.114f * b);
+    unsigned char res = (gray > threshold) ? 255 : 0;
+
+    data[offset] = res;
+    data[offset + 1] = res;
+    data[offset + 2] = res;
+}
+
 // TILE_WIDTH musi byc znane przy kompilacji 
 // bo rozmiar tablicy shared musi byc znany przy kompilacji 
 #define TILE_WIDTH 16
@@ -470,7 +492,7 @@ void runCuda(unsigned char* data, int width, int height, float mixFactors[10]) {
     );
 
     if(mixFactors[0] >= 0.0f)
-        thresholdKernel<<<blocksPerGrid, threadsPerBlock>>>(d_buffer, numPixels, (unsigned char)(255*mixFactors[0]));
+        threshold<<<blocksPerGrid, threadsPerBlock>>>(d_buffer, height, width, (unsigned char)(255*mixFactors[0]));
     if(mixFactors[1] >= 0.0f) {
         cudaMemcpyToSymbol(c_filter, {
             {1.f/9, 1.f/9, 1.f/9},
