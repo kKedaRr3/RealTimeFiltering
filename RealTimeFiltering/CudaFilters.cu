@@ -31,7 +31,84 @@ __global__ void thresholdKernel(unsigned char* data, int numPixels, unsigned cha
 // bo rozmiar tablicy shared musi byc znany przy kompilacji 
 #define TILE_WIDTH 16
 
-// 3x3 filter kernel with average low pass filter
+// Filter array in GPU constant memory
+__constant__ float c_filter[3][3];
+
+// generic 3x3 filter kernel
+__global__ void filter3x3(unsigned char* data, int sizeV, int sizeH, float mix) {
+    if(mix == 0.0f) return;
+
+    const int sharedSize = TILE_WIDTH + 2;
+    __shared__ unsigned char
+        tile[sharedSize][sharedSize][3];
+
+    // Flattened thread id
+    int tid = threadIdx.y * TILE_WIDTH + threadIdx.x;
+
+    // Global pixel coordinates
+    int row = blockIdx.y * TILE_WIDTH + threadIdx.y;
+    int col = blockIdx.x * TILE_WIDTH + threadIdx.x;
+
+    // Load values into shared memory
+    for (int index = tid; 
+            index < sharedSize * sharedSize; 
+            index += TILE_WIDTH * TILE_WIDTH) {
+        int sRow = index / sharedSize;
+        int sCol = index % sharedSize;
+        int gRow = blockIdx.y * TILE_WIDTH + sRow - 1;
+        int gCol = blockIdx.x * TILE_WIDTH + sCol - 1;
+
+        if (gRow >= 0 && gRow < sizeV && gCol >= 0 && gCol < sizeH) {
+            int globalOffset = (gRow * sizeH + gCol) * 3;
+            tile[sRow][sCol][0] = data[globalOffset + 0]; // B
+            tile[sRow][sCol][1] = data[globalOffset + 1]; // G
+            tile[sRow][sCol][2] = data[globalOffset + 2]; // R
+        } else {
+            tile[sRow][sCol][0] = 0;
+            tile[sRow][sCol][1] = 0;
+            tile[sRow][sCol][2] = 0;
+        }
+    }
+
+    __syncthreads();
+
+    // Apply 3x3 filter
+    if (row < sizeV && col < sizeH)
+    {
+        float sumB = 0.0f;
+        float sumG = 0.0f;
+        float sumR = 0.0f;
+
+        #pragma unroll
+        for (int dy=0; dy<=2; ++dy) {
+            #pragma unroll
+            for (int dx=0; dx<=2; ++dx) {
+                int sy = threadIdx.y + dy;
+                int sx = threadIdx.x + dx;
+                sumB += c_filter[dy][dx] * tile[sy][sx][0];
+                sumG += c_filter[dy][dx] * tile[sy][sx][1];
+                sumR += c_filter[dy][dx] * tile[sy][sx][2];
+            }
+        }
+
+        // Output clamped and weighed
+        int outputOffset = (row * sizeH + col) * 3;
+        data[outputOffset + 0] = (unsigned char)(
+            tile[ty + 1][tx + 1][0] * (1.0f - mix) +
+            fminf(255.0f, fmaxf(0.0f, sumB)) * mix
+        );
+        data[outputOffset + 1] = (unsigned char)(
+            tile[ty + 1][tx + 1][1] * (1.0f - mix) +
+            fminf(255.0f, fmaxf(0.0f, sumG)) * mix
+        );
+        data[outputOffset + 2] = (unsigned char)(
+            tile[ty + 1][tx + 1][2] * (1.0f - mix) +
+            fminf(255.0f, fmaxf(0.0f, sumR)) * mix
+        );
+    }
+}
+
+// obsolete
 __global__ void filter3x3_LowPass(unsigned char* data, int sizeV, int sizeH)
 {
     const int sharedSize = TILE_WIDTH + 2;
@@ -127,6 +204,7 @@ __global__ void filter3x3_LowPass(unsigned char* data, int sizeV, int sizeH)
     }
 }
 
+// obsolete
 __global__ void filter3x3_HighPass(unsigned char* data, int sizeV, int sizeH) {
     const int sharedSize = TILE_WIDTH + 2;
     __shared__ unsigned char tile[sharedSize][sharedSize][3];
@@ -184,21 +262,13 @@ __global__ void filter3x3_HighPass(unsigned char* data, int sizeV, int sizeH) {
 }
 
 // Sobel edge detection
-__global__ void sobelKernel(unsigned char* input, unsigned char* output, int width, int height) {
+__global__ void sobelKernel(unsigned char* data, int width, int height) {
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (row >= height || col >= width) return;
 
     int outOffset = (row * width + col) * 3;
-
-    // Brzegi ustawiamy na czarno, bo tam nie ma pełnego sąsiedztwa 3x3
-    if (row == 0 || col == 0 || row == height - 1 || col == width - 1) {
-        output[outOffset + 0] = 0;
-        output[outOffset + 1] = 0;
-        output[outOffset + 2] = 0;
-        return;
-    }
 
     int gx[3][3] = {
         {-1, 0, 1},
@@ -219,9 +289,9 @@ __global__ void sobelKernel(unsigned char* input, unsigned char* output, int wid
         for (int dx = -1; dx <= 1; dx++) {
             int offset = ((row + dy) * width + (col + dx)) * 3;
 
-            unsigned char b = input[offset + 0];
-            unsigned char g = input[offset + 1];
-            unsigned char r = input[offset + 2];
+            unsigned char b = data[offset + 0];
+            unsigned char g = data[offset + 1];
+            unsigned char r = data[offset + 2];
 
             float gray = 0.299f * r + 0.587f * g + 0.114f * b;
 
@@ -230,20 +300,20 @@ __global__ void sobelKernel(unsigned char* input, unsigned char* output, int wid
         }
     }
 
-    float value = sqrtf(sumX * sumX + sumY * sumY);
+    unsigned char edge = (unsigned char)
+        fmaxf(0.0f, fminf(255.0f, sqrtf(sumX * sumX + sumY * sumY)));
 
-    value = fmaxf(0.0f, fminf(255.0f, value));
+    // Brzegi ustawiamy na czarno, bo tam nie ma pełnego sąsiedztwa 3x3
+    if (row == 0 || col == 0 || row == height - 1 || col == width - 1)
+        edge = 0;
 
-    unsigned char edge = (unsigned char)value;
-
-    output[outOffset + 0] = edge;
-    output[outOffset + 1] = edge;
-    output[outOffset + 2] = edge;
+    data[outOffset + 0] = edge;
+    data[outOffset + 1] = edge;
+    data[outOffset + 2] = edge;
 }
 
 // 2. ZMIENNE I FUNKCJE POMOCNICZE
 unsigned char* d_buffer = nullptr;
-unsigned char* d_output = nullptr;
 int currentBufferSize = 0;
 
 void initCudaBuffer(int width, int height, int channels) {
@@ -251,10 +321,7 @@ void initCudaBuffer(int width, int height, int channels) {
 
     if (d_buffer == nullptr || size != currentBufferSize) {
         if (d_buffer != nullptr) cudaFree(d_buffer);
-        if (d_output != nullptr) cudaFree(d_output);
-
         cudaMalloc(&d_buffer, size);
-        cudaMalloc(&d_output, size);
 
         currentBufferSize = size;
     }
@@ -264,11 +331,6 @@ void freeCudaBuffer() {
     if (d_buffer != nullptr) {
         cudaFree(d_buffer);
         d_buffer = nullptr;
-    }
-
-    if (d_output != nullptr) {
-        cudaFree(d_output);
-        d_output = nullptr;
     }
 
     currentBufferSize = 0;
@@ -293,6 +355,28 @@ void applyThresholdCuda(unsigned char* data, int width, int height, int channels
     cudaMemcpy(data, d_buffer, totalBytes, cudaMemcpyDeviceToHost);
 }
 
+void applyFilterCuda(unsigned char* data, int width, int height, float filter[3][3], float mix) {
+    if (d_buffer == nullptr || data == nullptr || width <= 0 || height <= 0)
+        return;
+
+    int numPixels = width * height;
+    int totalBytes = numPixels * 3 * sizeof(unsigned char);
+
+    cudaMemcpy(d_buffer, data, totalBytes, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(c_filter, filter, sizeof(float) * 9);
+
+    dim3 dimBlock(TILE_WIDTH, TILE_WIDTH);
+    dim3 dimGrid(
+        (width - 1) / TILE_WIDTH + 1,
+        (height - 1) / TILE_WIDTH + 1
+    );
+
+    filter3x3<<<dimGrid, dimBlock>>> (d_buffer, height, width, mix);
+
+    cudaMemcpy(data, d_buffer, totalBytes, cudaMemcpyDeviceToHost);
+}
+
+// obsolete
 void applyLowPassCuda(unsigned char* data, int width, int height) {
     if (d_buffer == nullptr || data == nullptr || width <= 0 || height <= 0) {
         return;
@@ -314,6 +398,7 @@ void applyLowPassCuda(unsigned char* data, int width, int height) {
     cudaMemcpy(data, d_buffer, totalBytes, cudaMemcpyDeviceToHost);
 }
 
+// obsolete
 void applyHighPassCuda(unsigned char* data, int width, int height) {
     if (d_buffer == nullptr || data == nullptr || width <= 0 || height <= 0) {
         return;
@@ -335,7 +420,7 @@ void applyHighPassCuda(unsigned char* data, int width, int height) {
 }
 
 void applyEdgeDetectionCuda(unsigned char* data, int width, int height) {
-    if (d_buffer == nullptr || d_output == nullptr || data == nullptr || width <= 0 || height <= 0) {
+    if (d_buffer == nullptr || data == nullptr || width <= 0 || height <= 0) {
         return;
     }
 
@@ -349,9 +434,65 @@ void applyEdgeDetectionCuda(unsigned char* data, int width, int height) {
         (height - 1) / TILE_WIDTH + 1
     );
 
-    sobelKernel << <dimGrid, dimBlock >> > (d_buffer, d_output, width, height);
+    sobelKernel << <dimGrid, dimBlock >> > (d_buffer, width, height);
 
-    cudaMemcpy(data, d_output, totalBytes, cudaMemcpyDeviceToHost);
+    cudaMemcpy(data, d_buffer, totalBytes, cudaMemcpyDeviceToHost);
+}
+
+
+void runCuda(unsigned char* data, int width, int height, float mixFactors[10]) {
+// Pass mix factors for all possible effects as array of floats 0-1
+// If an effect is not enabled, pass -1
+// Effects:
+// 0 - Threshold
+// 1 - Low pass
+// 2 - High pass
+// 3 - Sobel
+// 4 - Median*
+// 5 - Posterize*
+// 6 - 
+// 7 - 
+// 8 - 
+// 9 - 
+
+    if (d_buffer == nullptr || data == nullptr || width <= 0 || height <= 0)
+        return;
+
+    int numPixels = width * height;
+    int totalBytes = numPixels * 3 * sizeof(unsigned char);
+
+    cudaMemcpy(d_buffer, data, totalBytes, cudaMemcpyHostToDevice);
+
+    dim3 dimBlock(TILE_WIDTH, TILE_WIDTH);
+    dim3 dimGrid(
+        (width - 1) / TILE_WIDTH + 1,
+        (height - 1) / TILE_WIDTH + 1
+    );
+
+    if(mixFactors[0] >= 0.0f)
+        thresholdKernel<<<blocksPerGrid, threadsPerBlock>>>(d_buffer, numPixels, (unsigned char)(255*mixFactors[0]));
+    if(mixFactors[1] >= 0.0f) {
+        cudaMemcpyToSymbol(c_filter, {
+            {1.f/9, 1.f/9, 1.f/9},
+            {1.f/9, 1.f/9, 1.f/9},
+            {1.f/9, 1.f/9, 1.f/9}
+        }, sizeof(float) * 9);
+        filter3x3<<<dimGrid, dimBlock>>> (d_buffer, height, width, mix);
+    }
+    if(mixFactors[2] >= 0.0f) {
+        cudaMemcpyToSymbol(c_filter, {
+            { 0.f, -1.f,  0.f },
+            {-1.f,  5.f, -1.f },
+            { 0.f, -1.f,  0.f }
+        }, sizeof(float) * 9);
+        filter3x3<<<dimGrid, dimBlock>>> (d_buffer, height, width, mix);
+    }
+    if(mixFactors[3] >= 0.0f)
+        SobelKernel<<<blocksPerGrid, threadsPerBlock>>>(d_buffer, numPixels, (unsigned char)(255*mixFactors[0]));
+    
+
+    
+    cudaMemcpy(data, d_buffer, totalBytes, cudaMemcpyDeviceToHost);
 }
 
 bool isCudaAvailable() {
