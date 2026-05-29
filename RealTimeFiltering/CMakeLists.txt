@@ -1,49 +1,42 @@
-﻿# Dodajemy main.cpp do listy plików
-add_executable (RealTimeFiltering 
+﻿cmake_minimum_required(VERSION 3.20)
+
+project(RealTimeFiltering LANGUAGES CXX CUDA)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
+
+set(Qt6_DIR "C:/Qt/6.11.1/msvc2022_64/lib/cmake/Qt6")
+set(OpenCV_DIR "C:/Users/matiu/Downloads/opencv/build/x64/vc16/lib")
+
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(OpenCV REQUIRED)
+
+add_executable(RealTimeFiltering
     "main.cpp"
-    "RealTimeFiltering.cpp" 
+    "RealTimeFiltering.cpp"
     "RealTimeFiltering.h"
-    "CudaFilters.cu"    
-    "CudaFilters.h"     
+    "CudaFilters.cu"
+    "CudaFilters.h"
 )
 
-# Łączymy z bibliotekami
-target_link_libraries(RealTimeFiltering PRIVATE 
-    Qt6::Widgets 
+target_link_libraries(RealTimeFiltering PRIVATE
+    Qt6::Widgets
     ${OpenCV_LIBS}
 )
 
-# Żeby Visual Studio widziało plik wideo w folderze z projektem
-set_target_properties(RealTimeFiltering PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+# Żeby Visual Studio uruchamiało program z folderu projektu
+set_target_properties(RealTimeFiltering PROPERTIES
+    VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+)
 
-# 1. Qt - Używamy narzędzia windeployqt
-# To narzędzie kopiuje wszystko: DLL-ki, foldery 'platforms', 'styles' itp.
+# OpenCV - kopiowanie DLL-ki
 if(WIN32)
-    # Szukamy gdzie jest qmake, żeby znaleźć folder bin od Qt
-    get_target_property(_qmake_executable Qt6::qmake IMPORTED_LOCATION)
-    get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
-    
-    # Wybieramy flagę --debug lub --release w zależności od konfiguracji VS
-    set(DEPLOY_FLAGS "")
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(DEPLOY_FLAGS "--debug")
-    else()
-        set(DEPLOY_FLAGS "--release")
-    endif()
+    set(OPENCV_DLL_NAME "opencv_world4110d.dll")
 
-    add_custom_command(TARGET RealTimeFiltering POST_BUILD
-        COMMAND "${_qt_bin_dir}/windeployqt.exe" ${DEPLOY_FLAGS} --no-translations --no-compiler-runtime "$<TARGET_FILE:RealTimeFiltering>"
-        COMMENT "Automatyczne wdrażanie bibliotek Qt..."
-    )
-endif()
-
-# 2. OpenCV - Kopiowanie konkretnej DLL-ki
-if(WIN32)
-    # Ponieważ OpenCV_DIR wskazuje na folder 'lib', DLL-ka jest w folderze '../bin'
-    # UWAGA: Sprawdź numer swojej wersji OpenCV! Jeśli masz 4.12.0, to będzie 4120.
-    set(OPENCV_DLL_NAME "opencv_world4120d.dll") 
-    
-    # Budujemy ścieżkę do binariów OpenCV
     get_filename_component(OPENCV_BIN_DIR "${OpenCV_DIR}/../bin" REALPATH)
 
     add_custom_command(TARGET RealTimeFiltering POST_BUILD

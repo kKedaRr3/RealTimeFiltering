@@ -12,8 +12,8 @@ set(CMAKE_AUTORCC ON)
 # Przykłady:
 # set(Qt6_DIR "C:/Qt/6.5.0/msvc2022_64/lib/cmake/Qt6")
 # set(OpenCV_DIR "C:/opencv/build")
-set(Qt6_DIR "A:/Qt/6.11.0/msvc2022_64/lib/cmake/Qt6")
-set(OpenCV_DIR "A:/OpenCV/opencv/build/x64/vc16/lib")
+set(Qt6_DIR "C:/Qt/6.11.1/mingw_64/lib/cmake/Qt6")
+set(OpenCV_DIR "C:/Users/matiu/Downloads/opencv/build/x64/vc16/lib")
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 find_package(OpenCV REQUIRED)
