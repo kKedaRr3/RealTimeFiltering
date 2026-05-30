@@ -201,14 +201,11 @@ __global__ void filter3x3_HighPass(unsigned char* data, int sizeV, int sizeH, fl
 __global__ void sobelKernel(unsigned char* input, unsigned char* output, int width, int height, float mix)
 {
     const int sharedSize = TILE_WIDTH + 2;
-
-    // Shared memory stores grayscale values only
-    __shared__ unsigned char tile[sharedSize][sharedSize];
+    __shared__ unsigned char tile[sharedSize][sharedSize];    // Shared memory stores grayscale values only
 
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int tid = ty * TILE_WIDTH + tx;
-
     int row = blockIdx.y * TILE_WIDTH + ty;
     int col = blockIdx.x * TILE_WIDTH + tx;
 
@@ -217,7 +214,6 @@ __global__ void sobelKernel(unsigned char* input, unsigned char* output, int wid
     {
         int sRow = index / sharedSize;
         int sCol = index % sharedSize;
-
         int gRow = blockIdx.y * TILE_WIDTH + sRow - 1;
         int gCol = blockIdx.x * TILE_WIDTH + sCol - 1;
 
@@ -238,7 +234,6 @@ __global__ void sobelKernel(unsigned char* input, unsigned char* output, int wid
             tile[sRow][sCol] = 0;
         }
     }
-
     __syncthreads();
 
     if (row >= height || col >= width) {
@@ -246,7 +241,6 @@ __global__ void sobelKernel(unsigned char* input, unsigned char* output, int wid
     }
 
     int outOffset = (row * width + col) * 3;
-
     // Brzegi obrazu ustawiamy na czarno
     if (row == 0 || col == 0 || row == height - 1 || col == width - 1)
     {
@@ -256,25 +250,10 @@ __global__ void sobelKernel(unsigned char* input, unsigned char* output, int wid
         return;
     }
 
-    int gx =
-        -tile[ty][tx] +
-        tile[ty][tx + 2] -
-        2 * tile[ty + 1][tx] +
-        2 * tile[ty + 1][tx + 2] -
-        tile[ty + 2][tx] +
-        tile[ty + 2][tx + 2];
-
-    int gy =
-        -tile[ty][tx] -
-        2 * tile[ty][tx + 1] -
-        tile[ty][tx + 2] +
-        tile[ty + 2][tx] +
-        2 * tile[ty + 2][tx + 1] +
-        tile[ty + 2][tx + 2];
-
+    int gx = -tile[ty][tx] + tile[ty][tx + 2] - 2 * tile[ty + 1][tx] + 2 * tile[ty + 1][tx + 2] - tile[ty + 2][tx] + tile[ty + 2][tx + 2];
+    int gy = -tile[ty][tx] - 2 * tile[ty][tx + 1] - tile[ty][tx + 2] + tile[ty + 2][tx] + 2 * tile[ty + 2][tx + 1] + tile[ty + 2][tx + 2];
     float value = sqrtf((float)(gx * gx + gy * gy));
     value = fmaxf(0.0f, fminf(255.0f, value));
-
     unsigned char edge = (unsigned char)value;
 
     // Mix original and edge value
