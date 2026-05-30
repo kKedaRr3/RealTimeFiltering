@@ -8,6 +8,8 @@
 #include <QThread>
 #include <QMutex>
 #include <opencv2/opencv.hpp>
+#include <QSlider>
+#include <QLabel>
 
 class CameraWorker : public QObject {
     Q_OBJECT
@@ -53,4 +55,10 @@ private:
 
     QList<QPushButton*> filterButtons;
     QList<int> filterPipeline;
+
+    void addSliders(QVBoxLayout* layout);
+    QSlider* highPassSlider;
+    QSlider* lowPassSlider;
+    QSlider* thresholdSlider;
+    QSlider* edgeSlider;
 };

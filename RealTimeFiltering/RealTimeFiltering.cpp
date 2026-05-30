@@ -4,6 +4,8 @@
 #include <QPixmap>
 #include "CudaFilters.h" 
 #include <QDebug>
+#include <QFormLayout>
+#include <QSlider>
 
 void CameraWorker::process() {
     while (running) {
@@ -40,6 +42,7 @@ RealTimeFiltering::RealTimeFiltering(QWidget* parent) : QMainWindow(parent) {
 
     layout->addLayout(topBar, 0);
     layout->addWidget(videoLabel, 1);
+    addSliders(layout);
 
     QHBoxLayout* bottomLayout = new QHBoxLayout();
     bottomLayout->addStretch();
@@ -102,16 +105,20 @@ void RealTimeFiltering::onFrameReceived(cv::Mat frame) {
 
         for (int filterId : filterPipeline) {
             if (filterId == 1) {
-                applyHighPassCuda(frame.data, frame.cols, frame.rows);
+                float mix = highPassSlider->value() / 100.0f;
+                applyHighPassCuda(frame.data, frame.cols, frame.rows, mix);
             }
             else if (filterId == 2) {
-                applyLowPassCuda(frame.data, frame.cols, frame.rows);
+                float mix = lowPassSlider->value() / 100.0f;
+                applyLowPassCuda(frame.data, frame.cols, frame.rows, mix);
             }
             else if (filterId == 3) {
-                applyThresholdCuda(frame.data, frame.cols, frame.rows, frame.channels(), 150);
+                unsigned char threshold = (unsigned char)thresholdSlider->value();
+                applyThresholdCuda(frame.data, frame.cols, frame.rows, frame.channels(), threshold);
             }
             else if (filterId == 4) {
-                applyEdgeDetectionCuda(frame.data, frame.cols, frame.rows);
+                float mix = edgeSlider->value() / 100.0f;
+                applyEdgeDetectionCuda(frame.data, frame.cols, frame.rows, mix);
             }
         }
     }
@@ -127,12 +134,14 @@ void RealTimeFiltering::onFrameReceived(cv::Mat frame) {
 
     tm.stop();
     frameCounter++;
+
     if (frameCounter >= 15) {
         fpsLabel->setText(QString("FPS: %1").arg(QString::number(tm.getFPS(), 'f', 1)));
         tm.reset();
         frameCounter = 0;
     }
 }
+
 
 void RealTimeFiltering::addButtons(QHBoxLayout* topBar) {
     QStringList names = { "Oryginał", "Górnoprzepustowy", "Dolnoprzepustowy", "Binaryzacja", "Detekcja krawędzi" };
@@ -144,4 +153,30 @@ void RealTimeFiltering::addButtons(QHBoxLayout* topBar) {
         topBar->addWidget(btn);
         filterButtons.append(btn);
     }
+}
+void RealTimeFiltering::addSliders(QVBoxLayout* layout) {
+    auto* form = new QFormLayout();
+
+    highPassSlider = new QSlider(Qt::Horizontal);
+    highPassSlider->setRange(0, 100);
+    highPassSlider->setValue(100);
+
+    lowPassSlider = new QSlider(Qt::Horizontal);
+    lowPassSlider->setRange(0, 100);
+    lowPassSlider->setValue(100);
+
+    thresholdSlider = new QSlider(Qt::Horizontal);
+    thresholdSlider->setRange(0, 255);
+    thresholdSlider->setValue(150);
+
+    edgeSlider = new QSlider(Qt::Horizontal);
+    edgeSlider->setRange(0, 100);
+    edgeSlider->setValue(100);
+
+    form->addRow("Górnoprzepustowy:", highPassSlider);
+    form->addRow("Dolnoprzepustowy:", lowPassSlider);
+    form->addRow("Próg binaryzacji:", thresholdSlider);
+    form->addRow("Krawędzie:", edgeSlider);
+
+    layout->addLayout(form, 0);
 }
