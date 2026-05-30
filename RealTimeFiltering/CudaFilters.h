@@ -14,5 +14,7 @@ void applyHighPassCuda(unsigned char* data, int width, int height, float mix);
 
 void applyEdgeDetectionCuda(unsigned char* data, int width, int height, float mix);
 
+void runCuda(unsigned char* data, int width, int height, float mixFactors[10]);
+
 // Funkcja wywoływana na końcu
 void freeCudaBuffer();

@@ -61,4 +61,6 @@ private:
     QSlider* lowPassSlider;
     QSlider* thresholdSlider;
     QSlider* edgeSlider;
+    QSlider* medianSlider;
+    QSlider* posterizeSlider;
 };

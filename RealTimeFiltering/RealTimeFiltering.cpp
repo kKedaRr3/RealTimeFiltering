@@ -103,27 +103,46 @@ void RealTimeFiltering::onFrameReceived(cv::Mat frame) {
     if (!filterButtons[0]->isChecked() && !filterPipeline.isEmpty()) {
         initCudaBuffer(frame.cols, frame.rows, frame.channels());
 
+        float mixFactors[10];
+        // -1 oznacza, że dany filtr jest wyłączony
+        for (int i = 0; i < 10; i++) {
+            mixFactors[i] = -1.0f;
+        }
+
         for (int filterId : filterPipeline) {
             if (filterId == 1) {
-                float mix = highPassSlider->value() / 100.0f;
-                applyHighPassCuda(frame.data, frame.cols, frame.rows, mix);
+                // runCuda index 2: high pass
+                mixFactors[2] = highPassSlider->value() / 100.0f;
             }
             else if (filterId == 2) {
-                float mix = lowPassSlider->value() / 100.0f;
-                applyLowPassCuda(frame.data, frame.cols, frame.rows, mix);
+                // runCuda index 1: low pass
+                mixFactors[1] = lowPassSlider->value() / 100.0f;
             }
             else if (filterId == 3) {
-                unsigned char threshold = (unsigned char)thresholdSlider->value();
-                applyThresholdCuda(frame.data, frame.cols, frame.rows, frame.channels(), threshold);
+                // runCuda index 0: threshold
+                // runCuda mnoży to później przez 255
+                mixFactors[0] = thresholdSlider->value() / 255.0f;
             }
             else if (filterId == 4) {
-                float mix = edgeSlider->value() / 100.0f;
-                applyEdgeDetectionCuda(frame.data, frame.cols, frame.rows, mix);
+                // runCuda index 3: Sobel
+                mixFactors[3] = edgeSlider->value() / 100.0f;
+            }
+            else if (filterId == 5) {
+                // runCuda index 4: median
+                mixFactors[4] = medianSlider->value() / 100.0f;
+            }
+            else if (filterId == 6) {
+                // runCuda index 5: posterize
+                mixFactors[5] = posterizeSlider->value() / 100.0f;
             }
         }
+
+        // Jedno wywołanie CUDA dla całego pipeline'u filtrów
+        runCuda(frame.data, frame.cols, frame.rows, mixFactors);
     }
 
     cv::cvtColor(frame, frame, cv::COLOR_BGR2RGB);
+
     QImage qimg(frame.data, frame.cols, frame.rows, (int)frame.step, QImage::Format_RGB888);
 
     videoLabel->setPixmap(QPixmap::fromImage(qimg).scaled(
@@ -144,7 +163,7 @@ void RealTimeFiltering::onFrameReceived(cv::Mat frame) {
 
 
 void RealTimeFiltering::addButtons(QHBoxLayout* topBar) {
-    QStringList names = { "Oryginał", "Górnoprzepustowy", "Dolnoprzepustowy", "Binaryzacja", "Detekcja krawędzi" };
+    QStringList names = { "Oryginał", "Górnoprzepustowy", "Dolnoprzepustowy", "Binaryzacja", "Detekcja krawędzi", "Mediana", "Posterize" };
     for (int i = 0; i < names.size(); ++i) {
         auto* btn = new QPushButton(names[i]);
         btn->setCheckable(true);
@@ -173,10 +192,20 @@ void RealTimeFiltering::addSliders(QVBoxLayout* layout) {
     edgeSlider->setRange(0, 100);
     edgeSlider->setValue(100);
 
+    medianSlider = new QSlider(Qt::Horizontal);
+    medianSlider->setRange(0, 100);
+    medianSlider->setValue(100);
+
+    posterizeSlider = new QSlider(Qt::Horizontal);
+    posterizeSlider->setRange(0, 100);
+    posterizeSlider->setValue(50);
+
     form->addRow("Górnoprzepustowy:", highPassSlider);
     form->addRow("Dolnoprzepustowy:", lowPassSlider);
     form->addRow("Próg binaryzacji:", thresholdSlider);
     form->addRow("Krawędzie:", edgeSlider);
+    form->addRow("Mediana:", medianSlider);
+    form->addRow("Posterize:", posterizeSlider);
 
     layout->addLayout(form, 0);
 }

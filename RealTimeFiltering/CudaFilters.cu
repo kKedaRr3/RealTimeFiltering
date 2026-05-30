@@ -201,69 +201,108 @@ __global__ void filter3x3_HighPass(unsigned char* data, int sizeV, int sizeH, fl
 __global__ void sobelKernel(unsigned char* input, unsigned char* output, int width, int height, float mix)
 {
     const int sharedSize = TILE_WIDTH + 2;
-    __shared__ unsigned char tile[sharedSize][sharedSize];    // Shared memory stores grayscale values only
+
+    // Shared memory for BGR image, same style as other 3x3 filters
+    __shared__ unsigned char tile[sharedSize][sharedSize][3];
 
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int tid = ty * TILE_WIDTH + tx;
+
     int row = blockIdx.y * TILE_WIDTH + ty;
     int col = blockIdx.x * TILE_WIDTH + tx;
 
-    // Wczytanie kafelka 16x16 + obwódki 1 piksel do shared memory
+    // Load tile 16x16 + 1 pixel halo into shared memory
     for (int index = tid; index < sharedSize * sharedSize; index += TILE_WIDTH * TILE_WIDTH)
     {
         int sRow = index / sharedSize;
         int sCol = index % sharedSize;
+
         int gRow = blockIdx.y * TILE_WIDTH + sRow - 1;
         int gCol = blockIdx.x * TILE_WIDTH + sCol - 1;
 
         if (gRow >= 0 && gRow < height && gCol >= 0 && gCol < width)
         {
-            int offset = (gRow * width + gCol) * 3;
+            int globalOffset = (gRow * width + gCol) * 3;
 
-            unsigned char b = input[offset + 0];
-            unsigned char g = input[offset + 1];
-            unsigned char r = input[offset + 2];
-
-            unsigned char gray = (unsigned char)(0.299f * r + 0.587f * g + 0.114f * b);
-
-            tile[sRow][sCol] = gray;
+            tile[sRow][sCol][0] = input[globalOffset + 0]; // B
+            tile[sRow][sCol][1] = input[globalOffset + 1]; // G
+            tile[sRow][sCol][2] = input[globalOffset + 2]; // R
         }
         else
         {
-            tile[sRow][sCol] = 0;
+            tile[sRow][sCol][0] = 0;
+            tile[sRow][sCol][1] = 0;
+            tile[sRow][sCol][2] = 0;
         }
     }
+
     __syncthreads();
 
-    if (row >= height || col >= width) {
+    if (row >= height || col >= width)
+    {
         return;
     }
 
-    int outOffset = (row * width + col) * 3;
-    // Brzegi obrazu ustawiamy na czarno
+    int outputOffset = (row * width + col) * 3;
+
+    // Border pixels do not have full 3x3 neighbourhood
     if (row == 0 || col == 0 || row == height - 1 || col == width - 1)
     {
-        output[outOffset + 0] = 0;
-        output[outOffset + 1] = 0;
-        output[outOffset + 2] = 0;
+        output[outputOffset + 0] = 0;
+        output[outputOffset + 1] = 0;
+        output[outputOffset + 2] = 0;
         return;
     }
 
-    int gx = -tile[ty][tx] + tile[ty][tx + 2] - 2 * tile[ty + 1][tx] + 2 * tile[ty + 1][tx + 2] - tile[ty + 2][tx] + tile[ty + 2][tx + 2];
-    int gy = -tile[ty][tx] - 2 * tile[ty][tx + 1] - tile[ty][tx + 2] + tile[ty + 2][tx] + 2 * tile[ty + 2][tx + 1] + tile[ty + 2][tx + 2];
-    float value = sqrtf((float)(gx * gx + gy * gy));
+    float sumX = 0.0f;
+    float sumY = 0.0f;
+
+    float gx[3][3] = {
+        {-1.0f, 0.0f, 1.0f},
+        {-2.0f, 0.0f, 2.0f},
+        {-1.0f, 0.0f, 1.0f}
+    };
+
+    float gy[3][3] = {
+        {-1.0f, -2.0f, -1.0f},
+        { 0.0f,  0.0f,  0.0f},
+        { 1.0f,  2.0f,  1.0f}
+    };
+
+    // Same idea as generic 3x3 filter, but here we calculate two convolutions: X and Y
+#pragma unroll
+    for (int dy = 0; dy < 3; dy++)
+    {
+#pragma unroll
+        for (int dx = 0; dx < 3; dx++)
+        {
+            int sy = ty + dy;
+            int sx = tx + dx;
+
+            unsigned char b = tile[sy][sx][0];
+            unsigned char g = tile[sy][sx][1];
+            unsigned char r = tile[sy][sx][2];
+
+            float gray = 0.299f * r + 0.587f * g + 0.114f * b;
+
+            sumX += gray * gx[dy][dx];
+            sumY += gray * gy[dy][dx];
+        }
+    }
+
+    float value = sqrtf(sumX * sumX + sumY * sumY);
     value = fmaxf(0.0f, fminf(255.0f, value));
+
     unsigned char edge = (unsigned char)value;
 
-    // Mix original and edge value
-    unsigned char origB = input[outOffset + 0];
-    unsigned char origG = input[outOffset + 1];
-    unsigned char origR = input[outOffset + 2];
+    unsigned char origB = tile[ty + 1][tx + 1][0];
+    unsigned char origG = tile[ty + 1][tx + 1][1];
+    unsigned char origR = tile[ty + 1][tx + 1][2];
 
-    output[outOffset + 0] = (unsigned char)(origB * (1.0f - mix) + edge * mix);
-    output[outOffset + 1] = (unsigned char)(origG * (1.0f - mix) + edge * mix);
-    output[outOffset + 2] = (unsigned char)(origR * (1.0f - mix) + edge * mix);
+    output[outputOffset + 0] = (unsigned char)(origB * (1.0f - mix) + edge * mix);
+    output[outputOffset + 1] = (unsigned char)(origG * (1.0f - mix) + edge * mix);
+    output[outputOffset + 2] = (unsigned char)(origR * (1.0f - mix) + edge * mix);
 }
 
 // New threshold kernel for dimblock
@@ -676,11 +715,14 @@ void runCuda(unsigned char* data, int width, int height, float mixFactors[10]) {
         cudaMemcpyToSymbol(c_filter, filter, sizeof(filter));
         filter3x3<<<dimGrid, dimBlock>>> (d_buffer, height, width, mixFactors[2]);
     }
-    if(mixFactors[3] >= 0.0f)
-        // sobel likely needs to be modified
-        // sobelKernel<<<dimGrid, dimBlock>>>(d_buffer, width, height);
-    if(mixFactors[4] >= 0.0f)
-        median3x3<<<dimGrid, dimBlock>>>(d_buffer, height, width, mixFactors[4]);
+    if (mixFactors[3] >= 0.0f) {
+        sobelKernel << <dimGrid, dimBlock >> > (d_buffer, d_output, width, height, mixFactors[3]);
+        cudaMemcpy(d_buffer, d_output, totalBytes, cudaMemcpyDeviceToDevice);
+    }
+
+    if (mixFactors[4] >= 0.0f) {
+        median3x3 << <dimGrid, dimBlock >> > (d_buffer, height, width, mixFactors[4]);
+    }
     if(mixFactors[5] >= 0.0f)
         posterize<<<dimGrid, dimBlock>>>(d_buffer, height, width, mixFactors[5]);
     
